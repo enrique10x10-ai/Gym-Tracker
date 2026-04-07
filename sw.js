@@ -1,19 +1,9 @@
-const CACHE = 'ironlog-v1';
-const ASSETS = [
-  './',
-  './index.html',
-  'https://fonts.googleapis.com/css2?family=Barlow:wght@400;700;800;900&family=Barlow+Condensed:wght@700;900&display=swap',
-  'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js',
-];
+const CACHE = 'ironlog-v2';
+const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE).then(cache => {
-      // Cache what we can, ignore failures for CDN resources
-      return Promise.allSettled(ASSETS.map(url => cache.add(url).catch(() => {})));
-    })
+    caches.open(CACHE).then(cache => cache.addAll(ASSETS).catch(()=>{}))
   );
   self.skipWaiting();
 });
@@ -28,20 +18,16 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // For Anthropic API calls — always go network, never cache
-  if (e.request.url.includes('anthropic.com')) {
-    return;
+  if (e.request.url.includes('anthropic.com') ||
+      e.request.url.includes('fonts.googleapis.com') ||
+      e.request.url.includes('cdnjs.cloudflare.com')) {
+    return; // always network for these
   }
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(response => {
-        if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE).then(cache => cache.put(e.request, clone));
-        }
-        return response;
-      }).catch(() => caches.match('./index.html'));
-    })
+    fetch(e.request).then(response => {
+      const clone = response.clone();
+      caches.open(CACHE).then(cache => cache.put(e.request, clone));
+      return response;
+    }).catch(() => caches.match(e.request).then(r => r || caches.match('./index.html')))
   );
 });
