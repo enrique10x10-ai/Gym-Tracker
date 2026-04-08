@@ -899,12 +899,78 @@ const HistoryTab = ({ workouts, setWorkouts }) => {
   );
 };
 
-// ─── TOOLS TAB (Timer + Consistency + PRs) ────────────────────────────────────
-const ToolsTab = ({ workouts, prs }) => {
+// ─── TOOLS TAB (Timer + Consistency + PRs + Export) ──────────────────────────
+const ToolsTab = ({ workouts, prs, bodyweight, setWorkouts, setPrs, setBodyweight }) => {
+  const [importMsg, setImportMsg] = useState("");
+  const fileRef = useRef();
+
+  const exportData = () => {
+    const data = {
+      exportedAt: new Date().toISOString(),
+      version: 2,
+      workouts,
+      prs,
+      bodyweight,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ironlog-backup-${new Date().toISOString().split("T")[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.workouts) setWorkouts(data.workouts);
+        if (data.prs) setPrs(data.prs);
+        if (data.bodyweight) setBodyweight(data.bodyweight);
+        setImportMsg(`✅ Imported ${data.workouts?.length||0} workouts successfully!`);
+        setTimeout(() => setImportMsg(""), 4000);
+      } catch {
+        setImportMsg("❌ Invalid file. Please use an IRONLOG backup JSON.");
+        setTimeout(() => setImportMsg(""), 4000);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div style={{maxWidth:600,margin:"0 auto",display:"flex",flexDirection:"column",gap:16}}>
       <RestTimer/>
       <ConsistencyTracker workouts={workouts}/>
+
+      {/* Export / Import */}
+      <Card>
+        <SL>📤 Data Export / Import</SL>
+        <div style={{fontSize:12,color:C.muted,marginBottom:14,lineHeight:1.6}}>
+          Export your full workout history as a JSON file. Upload it here in Claude.ai chat so your AI coach can analyze all your data — or use it as a backup.
+        </div>
+        <div style={{display:"flex",gap:10,marginBottom:10}}>
+          <Btn onClick={exportData} variant="cyan" style={{flex:1,fontSize:13}}>
+            📥 Export My Data
+          </Btn>
+          <Btn onClick={()=>fileRef.current?.click()} variant="ghost" style={{flex:1,fontSize:13}}>
+            📤 Import Backup
+          </Btn>
+          <input ref={fileRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
+        </div>
+        {importMsg && (
+          <div style={{padding:"8px 12px",background:`${C.cyan}15`,border:`1px solid ${C.cyan}44`,
+            borderRadius:8,fontSize:12,color:C.cyan,fontWeight:700}}>
+            {importMsg}
+          </div>
+        )}
+        <div style={{fontSize:11,color:C.muted,marginTop:8,lineHeight:1.5}}>
+          💡 To use with AI Coach: export the file, then upload it directly in your Claude.ai chat and ask "analyze my IRONLOG training data."
+        </div>
+      </Card>
       <Card>
         <SL>🏆 Personal Records</SL>
         {Object.keys(prs).length===0
@@ -1267,7 +1333,7 @@ function GymTracker() {
   const [workouts,setWorkouts]=useStorage("gym_workouts",[]);
   const [exercises,setExercises]=useStorage("gym_exercises",DEFAULT_EXERCISES);
   const [prs,setPrs]=useStorage("gym_prs",{});
-  const [bodyweight]=useStorage("gym_bodyweight",[]);
+  const [bodyweight,setBodyweight]=useStorage("gym_bodyweight",[]);
   const [showLibrary,setShowLibrary]=useState(false);
 
   const tabIcons=["💪","📋","🔧","⚖️","🤖"];
@@ -1303,7 +1369,7 @@ function GymTracker() {
       <div style={{maxWidth:700,margin:"0 auto",padding:"14px 12px"}}>
         {tab===0&&<LogTab exercises={exercises} setExercises={setExercises} workouts={workouts} setWorkouts={setWorkouts} prs={prs} setPrs={setPrs}/>}
         {tab===1&&<HistoryTab workouts={workouts} setWorkouts={setWorkouts}/>}
-        {tab===2&&<ToolsTab workouts={workouts} prs={prs}/>}
+        {tab===2&&<ToolsTab workouts={workouts} prs={prs} bodyweight={bodyweight} setWorkouts={setWorkouts} setPrs={setPrs} setBodyweight={setBodyweight}/>}
         {tab===3&&<BodyWeightTab/>}
         {tab===4&&<AICoachTab workouts={workouts} prs={prs} bodyweight={bodyweight}/>}
       </div>
