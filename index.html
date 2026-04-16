@@ -279,45 +279,60 @@ const ConsistencyTracker = ({ workouts }) => {
 };
 
 // ─── LOG TAB — speed-optimized ────────────────────────────────────────────────
+const DRAFT_KEY = "ironlog_draft_session";
+
 const LogTab = ({ exercises, setExercises, workouts, setWorkouts, prs, setPrs }) => {
   const today = new Date().toISOString().split("T")[0];
-  const [date, setDate] = useState(today);
 
-  // Sticky muscle group — persists across exercises until manually changed
+  // Load any saved draft from localStorage on mount
+  const loadDraft = () => {
+    try {
+      const d = localStorage.getItem(DRAFT_KEY);
+      return d ? JSON.parse(d) : null;
+    } catch { return null; }
+  };
+  const saveDraft = (draft) => {
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch {}
+  };
+  const clearDraft = () => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+  };
+
+  const draft = loadDraft();
+
+  const [date, setDate] = useState(draft?.date || today);
   const [muscleGroup, setMuscleGroup] = useState("");
   const [exercise, setExercise] = useState("");
-
-  // Flow steps: "select" | "st" | "sets" 
   const [step, setStep] = useState("select");
-
-  // Strength test
   const [stSkipped, setStSkipped] = useState(false);
   const [stReps, setStReps] = useState("3");
   const [stWeight, setStWeight] = useState("");
   const [stLogged, setStLogged] = useState(false);
   const [stResult, setStResult] = useState(null);
-
-  // Working sets
   const [sets, setSets] = useState([{ weight:"", reps:"" }]);
   const [currentSetIdx, setCurrentSetIdx] = useState(0);
-
-  // Inline add exercise
   const [showAddEx, setShowAddEx] = useState(false);
   const [newExName, setNewExName] = useState("");
 
-  // Session
-  const [sessionExercises, setSessionExercises] = useState([]);
-  const [notes, setNotes] = useState("");
+  // Session — restored from draft if available
+  const [sessionExercises, setSessionExercises] = useState(draft?.sessionExercises || []);
+  const [notes, setNotes] = useState(draft?.notes || "");
   const [saved, setSaved] = useState(false);
   const [editingIdx, setEditingIdx] = useState(null);
-
-  // Notes visibility
   const [showNotes, setShowNotes] = useState(false);
+  const [showDraftBanner, setShowDraftBanner] = useState(!!(draft?.sessionExercises?.length));
 
   // Refs for auto-focus
   const stWeightRef = useRef();
   const setWeightRef = useRef();
   const setRepsRef = useRef();
+
+  // Auto-save draft to localStorage whenever session changes
+  useEffect(() => {
+    if (sessionExercises.length > 0 || notes) {
+      saveDraft({ date, sessionExercises, notes, savedAt: new Date().toISOString() });
+    }
+  }, [sessionExercises, notes, date]);
 
   const availExercises = muscleGroup ? (exercises[muscleGroup]||[]) : [];
   const currentPR = getPR(prs, exercise);
@@ -325,18 +340,12 @@ const LogTab = ({ exercises, setExercises, workouts, setWorkouts, prs, setPrs })
   const weightLabel = isDB ? "Weight (lbs each)" : "Weight (lbs)";
   const weightSublabel = isDB ? "per dumbbell" : null;
 
-  // Auto-focus ST weight when step becomes "st"
   useEffect(() => {
-    if (step==="st" && !stSkipped) {
-      setTimeout(() => stWeightRef.current?.focus(), 80);
-    }
+    if (step==="st" && !stSkipped) setTimeout(() => stWeightRef.current?.focus(), 80);
   }, [step, stSkipped]);
 
-  // Auto-focus set weight when step becomes "sets"
   useEffect(() => {
-    if (step==="sets") {
-      setTimeout(() => setWeightRef.current?.focus(), 80);
-    }
+    if (step==="sets") setTimeout(() => setWeightRef.current?.focus(), 80);
   }, [step, currentSetIdx]);
 
   const handleExerciseSelect = (ex) => {
@@ -379,7 +388,6 @@ const LogTab = ({ exercises, setExercises, workouts, setWorkouts, prs, setPrs })
   const confirmSet = () => {
     const s = sets[currentSetIdx];
     if (!s.weight || !s.reps) return;
-    // auto-add next set row and focus its weight
     const next = currentSetIdx + 1;
     setSets([...sets, { weight:"", reps:"" }]);
     setCurrentSetIdx(next);
@@ -395,27 +403,24 @@ const LogTab = ({ exercises, setExercises, workouts, setWorkouts, prs, setPrs })
   const addExerciseToSession = () => {
     const filledSets = sets.filter(s => s.weight && s.reps);
     if (!exercise || !filledSets.length) return;
-
     const entry = {
       muscleGroup, exercise,
       sets: filledSets.map(s => ({ weight:Number(s.weight), reps:Number(s.reps) })),
       strengthTest: stResult || null,
       isDB,
     };
-
-    let newPrs = prs;
     const maxW = Math.max(...(stResult?[stResult.weight]:[]), ...entry.sets.map(s=>s.weight));
-    newPrs = setPR(prs, exercise, maxW, date);
-    setPrs(newPrs);
+    setPrs(setPR(prs, exercise, maxW, date));
 
+    let newSession;
     if (editingIdx !== null) {
-      const updated = [...sessionExercises]; updated[editingIdx] = entry;
-      setSessionExercises(updated); setEditingIdx(null);
+      newSession = [...sessionExercises]; newSession[editingIdx] = entry;
+      setEditingIdx(null);
     } else {
-      setSessionExercises([...sessionExercises, entry]);
+      newSession = [...sessionExercises, entry];
     }
+    setSessionExercises(newSession);
 
-    // Reset exercise fields but KEEP muscle group sticky
     setExercise(""); setStep("select");
     setStWeight(""); setStReps("3"); setStLogged(false); setStResult(null); setStSkipped(false);
     setSets([{ weight:"", reps:"" }]); setCurrentSetIdx(0);
@@ -431,14 +436,24 @@ const LogTab = ({ exercises, setExercises, workouts, setWorkouts, prs, setPrs })
     window.scrollTo({top:0, behavior:"smooth"});
   };
 
-  const removeExercise = (idx) => setSessionExercises(sessionExercises.filter((_,i)=>i!==idx));
+  const removeExercise = (idx) => {
+    const updated = sessionExercises.filter((_,i)=>i!==idx);
+    setSessionExercises(updated);
+    if (updated.length === 0) clearDraft();
+  };
 
   const saveWorkout = () => {
     if (!sessionExercises.length) return;
     setWorkouts([...workouts, { id:Date.now(), date, exercises:sessionExercises, notes }]);
     setSessionExercises([]); setNotes(""); setSaved(true);
+    clearDraft(); // wipe draft on successful save
     setTimeout(() => setSaved(false), 2500);
     setExercise(""); setMuscleGroup(""); setStep("select");
+  };
+
+  const discardDraft = () => {
+    setSessionExercises([]); setNotes(""); setDate(today);
+    clearDraft(); setShowDraftBanner(false);
   };
 
   const filledSets = sets.filter(s=>s.weight&&s.reps);
@@ -446,6 +461,25 @@ const LogTab = ({ exercises, setExercises, workouts, setWorkouts, prs, setPrs })
 
   return (
     <div style={{ maxWidth:600, margin:"0 auto" }}>
+
+      {/* Draft recovery banner */}
+      {showDraftBanner && sessionExercises.length > 0 && (
+        <div style={{ background:`${C.orange}18`, border:`1px solid ${C.orange}55`,
+          borderRadius:12, padding:"12px 16px", marginBottom:14,
+          display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+          <div>
+            <div style={{ fontWeight:800, color:C.orange, fontSize:13 }}>⚡ Workout recovered!</div>
+            <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
+              {sessionExercises.length} exercise{sessionExercises.length!==1?"s":""} restored from your last session on {date}
+            </div>
+          </div>
+          <button onClick={discardDraft}
+            style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted,
+              borderRadius:7, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+            Discard
+          </button>
+        </div>
+      )}
 
       {/* Date bar */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
